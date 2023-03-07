@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <title>Tekion 3d model</title>
+        <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+                <link rel="stylesheet" type="text/css" href="car.css">
+    </head>
+
+    <body class="noselect">
+        <script src="lib/three.js"></script>
+        <script src="lib/OrbitControls.js"></script>
+        <script src="lib/stats.min.js"></script>
+        <script>
+            var scene, camera, renderer, controls;
+            var car, mouse, raycaster;
+
+            var INTERSECTED;
+            var projector;
+            var helper;
+            var mtmp;
+            var stats;
+
+            var WIDTH;
+            var HEIGHT;
+            var isWeb;
+            const MODEL_TYPE = {
+                SUV: 'SUV_CollideMeshes',
+            };
+            var objectLoader = new THREE.ObjectLoader();
+            objectLoader.load('model/suv.json', function (obj) {
+                                  car = obj;
+                                  scene.add(obj);
+                                  isWeb = 0;
+                                  render();
+
+                                  sendMessageToNative({type: 'READY_TO_RENDER'});
+                });
+            init();
+
+
+            function init() {
+                WIDTH = window.innerWidth;
+                HEIGHT = window.innerHeight;
+                isWeb = 0;
+
+                // create the stats
+                stats = createStats();
+                //document.body.appendChild(stats.domElement);
+
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0xffffff);
+                camera = new THREE.PerspectiveCamera(2.5, WIDTH / HEIGHT, 1, 1000);
+                camera.position.x = -279.0224662273165;
+                camera.position.y = 4.825720244113106;
+                camera.position.z = -414.87730205996013;
+                camera.scale = 1.0;
+                camera.zoom = 1.0;
+
+                raycaster = new THREE.Raycaster();
+                mouse = new THREE.Vector2();
+                // projector = new THREE.Projector();
+
+                //show axes in the screen
+                var axisHelper = new THREE.AxisHelper(200);
+                //scene.add(axisHelper);
+
+                //CameraHelper
+                var cameraHelper = new THREE.CameraHelper(camera);
+                //scene.add(cameraHelper);
+
+
+                renderer = new THREE.WebGLRenderer();
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.setSize(WIDTH, HEIGHT);
+                document.body.appendChild(renderer.domElement);
+
+                document.addEventListener('mousemove', onDocumentMouseMove, false);
+                document.addEventListener('mousedown', onDocumentMouseDown, false);
+                document.body.addEventListener('touchstart', onDocumentMouseDown, false);
+                document.body.addEventListener('touchmove', onDocumentMouseMove, false);
+                document.body.addEventListener('touchend', onDocumentMouseUp, false);
+
+                mouse.isMoving = false;
+
+                controls = new THREE.OrbitControls(camera);
+                controls.addEventListener('change', render);
+                controls.enableZoom = true;
+                controls.enablePan = false;
+                controls.update();
+                controls.minPolarAngle = 0;
+                controls.maxPolarAngle = Math.PI / 2;
+                controls.minAzimuthAngle = -Infinity;
+                controls.maxAzimuthAngle = Infinity;
+
+                controls.minDistance = 100;
+                controls.maxDistance = 500;
+
+                var clock = new THREE.Clock();
+                var delta = clock.getDelta();
+                controls.update(delta);
+
+                // THREEDTRACE Step2: Type of car model/other message is received
+                // ANDROID
+                document.addEventListener("message", function(e) {
+                    console.log('window.addEventListener init: ', e);
+                    sendMessageToHTML(JSON.parse(e.data));
+                });
+            }
+
+        function sendMessageToHTML(message) {
+            var damageDetails = [];
+
+            if (message.type === 'REMOVE_DAMAGE') {
+                if (INTERSECTED.object.uniqueId === message.uniqueId)
+                car.remove(INTERSECTED.object)
+                render()
+            }
+
+            if (message.type === 'REMOVE_ALL_DAMAGES') {
+
+                const newMesh = car.children.filter((mesh) => {
+                                                    if (mesh.isAnnotation) {
+                                                    return true;
+                                                    };
+                                                    })
+
+                                                    for (let i = 0; i < newMesh.length; i += 1) {
+                                                        car.remove(newMesh[i]);
+                                                    }
+                                                    render()
+            }
+
+            if (message.type === 'sedan.json' || message.type === 'suv.json' || message.type === 'truck.json') {
+                let modelName = `model/${message.type}`
+                var objectLoader = new THREE.ObjectLoader();
+                removeDecalsForce();
+                // THREEDTRACE Step3: Send message to ThreeDModel.js for the typed car model is ready to render
+                objectLoader.load(modelName, function (obj) {
+                                  car = obj;
+                                  scene.add(obj);
+                                  render();
+
+                                  sendMessageToNative({type: 'READY_TO_RENDER'});
+                });
+            }
+
+            if (message.type === 'UPDATE_DECALS') {
+                // THREEDTRACE Step6: Received message from ThreeDModel.js with damage anotations
+                let tempObject = JSON.parse(message.decalDetails);
+                if (tempObject.constructor == Array) {
+                    damageDetails = [...tempObject]
+                } else {
+                    damageDetails.push(tempObject)
+                }
+
+                damageDetails.map(function (damageDetail, index) {
+                    createNumberedDamages(damageDetail, index);
+                    return
+
+                                  const isS3ImageURLPresentForDamageType = damageDetail.hasOwnProperty('s3ImageURLForDamageType')
+                                  var imagename;
+                                  if (isS3ImageURLPresentForDamageType) {
+                                  imagename = damageDetail.s3ImageURLForDamageType;
+                                  } else {
+                                  imagename = getImageBasedOnDamgeType(damageDetail.damageType);
+                                  }
+                                  var loader = new THREE.TextureLoader();
+                                  loader.load(imagename, function (texture) {
+                                              var geometry = new THREE.CircleGeometry(0.5, 1000);
+                                              var material = new THREE.MeshBasicMaterial({
+                                                                                         color: 0xFFFFFF,
+                                                                                         wireframe: false,
+                                                                                         wireframeLinewidth: 5,
+                                                                                         map: texture,
+                                                                                         side: THREE.DoubleSide,
+                                                                                         overdraw: 0.5
+                                                                                         });
+                                              // if (damageDetail.modelType && damageDetail.modelType === '3JS') {
+                                              let decalDetails = JSON.parse(damageDetail.annotationInfo);
+                                              let {
+                                              x,
+                                              y,
+                                              z,
+                                              uniqueId,
+                                              axis,
+                                              radians,
+                                              controlsObjectPosition,
+                                              } = decalDetails;
+                                              var mtmp = new THREE.Mesh(geometry, material);
+                                              mtmp.position.x = x;
+                                              mtmp.position.y = y;
+                                              mtmp.position.z = z;
+                                              mtmp.isAnnotation = true;
+                                              mtmp.uniqueId = uniqueId;
+                                              mtmp.rotation.setFromQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, radians));
+                                              mtmp.translateOnAxis(mtmp.worldToLocal(new THREE.Vector3(controlsObjectPosition.x, controlsObjectPosition.y, controlsObjectPosition.z)), 0.001);
+                                              car.add(mtmp);
+                                              // }
+                                              render()
+                                              }); //Loader Ends Here...
+                                  });
+            } //If UPDATE_DECALS Ends Here...
+
+        }
+
+        sendMessageToNative = (message) => {
+            // Sent message will be received at 'onMessage' of ThreeDModel.js
+            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(message));
+        }
+
+        createNumberedDamages = (damage, index) => {
+            const annotationObj = JSON.parse(damage.annotationInfo);
+            //window.alert(JSON.stringify(annotationObj));
+
+            let {
+                x,
+                y,
+                z,
+                uniqueId,
+                axis,
+                radians,
+                controlsObjectPosition,
+                modelType,
+                isWeb,
+            } = annotationObj;
+            const canvas = createRetinaCanvas(50, 50);
+            const ctx = canvas.getContext('2d', { antialias: false });
+            ctx.font = 'Bold 38px Arial';
+            ctx.beginPath();
+            ctx.arc(25, 25, 25, 0, 2 * Math.PI);
+            ctx.fillStyle = '#EE143A';
+            ctx.fill(); ctx.fillStyle = 'white';
+            ctx.fillText(index + 1 || '', 15, 38);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            // texture.needsUpdate = true;
+
+            const material = new THREE.SpriteMaterial({ map: texture });
+
+            const mtmp = new THREE.Sprite(material);
+            mtmp.position.x = annotationObj.x;
+
+            if ( isWeb === 0 ) { //From web
+				mtmp.position.y = annotationObj.y;
+			} else {
+				mtmp.position.y = this.annotatePositionY(annotationObj); //Tweaks for suv & sedan; web & mobile annotate sync
+			}
+
+            mtmp.position.z = annotationObj.z;
+            mtmp.isAnnotation = true;
+            mtmp.uniqueId = annotationObj.uniqueId;
+            mtmp.rotation.setFromQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, radians));
+            mtmp.translateOnAxis(mtmp.worldToLocal(new THREE.Vector3(controlsObjectPosition.x, controlsObjectPosition.y, controlsObjectPosition.z)), 0.001);
+
+            car.add(mtmp);
+            render();
+        }
+
+        annotatePositionY = (annotationObj) => {
+            const { modelType, y } = annotationObj;
+            if(modelType === MODEL_TYPE.SUV) {
+                return y;
+            }
+            return y + 3.75;
+        }
+
+        createRetinaCanvas = (w, h, ratio) => {
+            if (!ratio) {
+                ratio = pixel_ratio();
+            }
+            let canvas = document.createElement('canvas');
+            canvas.width = w * ratio;
+            canvas.height = h * ratio;
+            canvas.style.width = `${w }px`;
+            canvas.style.height = `${h }px`;
+
+            // canvas.getContext('2d').setTransform(ratio, 0, 0, ratio, 0, 0);
+            console.log('created canvas'); return canvas;
+        }
+
+
+        pixel_ratio = () => {
+            let ctx = document.createElement('canvas').getContext('2d');
+            var dpr = window.devicePixelRatio || 1;
+            var bsr = ctx.webkitBackingStorePixelRatio || ctx.mozBackingStorePixelRatio || ctx.msBackingStorePixelRatio || ctx.oBackingStorePixelRatio || ctx.backingStorePixelRatio || 1;
+            console.log('Pixel ratio', dpr / bsr);
+            return dpr / bsr;
+        }
+
+        getImageBasedOnDamgeType = (damageType) => {
+          const isImagesHasToBeLoadedFromServer = false;
+          if(isImagesHasToBeLoadedFromServer) {
+            switch (damageType) {
+                case 'Scratch':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Scratch-Default.png'
+                case 'Dent': //Is this has to be dent?
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Dent-Default.png'
+                case 'Chip':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Chip-Default.png'
+                case 'Stain':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Stain-Default.png'
+                case 'Broken':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Broken-Default.png'
+                case 'Crack':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Crack-Default.png'
+                case 'Others':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Other-Default.png'
+                case 'None':
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-None%403x.png'
+                default:
+                return 'https://s3-us-west-1.amazonaws.com/cdms-vehicle-damage-images/Icon-Damage-Other-Default.png'
+            }
+          } else {
+            switch (damageType) {
+                case 'Scratch':
+                return 'damageIcons/Icon-Damage-Scratch-Default.png'
+                case 'Dent': //Is this has to be dent?
+                return 'damageIcons/Icon-Damage-Dent-Default.png'
+                case 'Chip':
+                return 'damageIcons/Icon-Damage-Chip-Default.png'
+                case 'Stain':
+                return 'damageIcons/Icon-Damage-Stain-Default.png'
+                case 'Broken':
+                return 'damageIcons/Icon-Damage-Broken-Default.png'
+                case 'Crack':
+                return 'damageIcons/Icon-Damage-Crack-Default.png'
+                case 'Others':
+                return 'damageIcons/Icon-Damage-Other-Default.png'
+                case 'None':
+                return 'damageIcons/Icon-Damage-None.png'
+                default:
+                return 'damageIcons/Icon-Damage-Other-Default.png'
+            }
+          }
+        }
+
+        function createStats() {
+            var stats = new Stats();
+            stats.setMode(0); //FrameRate
+            //  stats.setMode(1); //MilliSeconds
+            stats.domElement.style.position = 'absolute';
+            stats.domElement.style.left = '0px';
+            stats.domElement.style.top = '0px';
+
+            return stats;
+        }
+
+        function onDocumentMouseDown(event) {
+            event.preventDefault();
+            mouse.isMoving = false;
+        }
+
+
+        function onDocumentMouseMove(event) {
+            mouse.isMoving = true;
+        }
+
+        function onDocumentMouseUp(event) {
+            if (!mouse.isMoving) {
+                mouse.x = (event.pageX / WIDTH) * 2 - 1;
+                mouse.y = -(event.pageY / HEIGHT) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                var intersects = raycaster.intersectObjects(scene.children, true);
+                if (intersects.length > 0) {
+                    INTERSECTED = intersects[0];
+                    for (var i = 0; i < (intersects.length) / 2; i++) {
+                        if (intersects[i].object.isAnnotation) {
+                            INTERSECTED = intersects[i];
+                        }
+                    }
+
+                    if (INTERSECTED.object.isAnnotation) {
+                        sendMessageToNative({
+                                            type: 'CONFIRM_REMOVE',
+                                            uniqueId: INTERSECTED.object.uniqueId,
+                                            });
+
+                    } else {
+                        var faces = INTERSECTED.object.geometry.faces;
+                        var modelType = INTERSECTED.object.parent.name;
+                        face = faces[INTERSECTED.faceIndex];
+
+                        var vec = face.normal.clone();
+                        var up = new THREE.Vector3(0, 1, 0);
+
+                        if (INTERSECTED.object.name == "collide_front" || INTERSECTED.object.name == "collide_back" || INTERSECTED.object.name == "collide_back02" || INTERSECTED.object.name == "collide_back03") {
+                            var axis = new THREE.Vector3(0, 1, 0);
+                        } else {
+                            var axis = vec.cross(up);
+                        }
+
+                        var radians = Math.acos(vec.dot(up));
+
+                        var uniqueId = new Date().valueOf();
+
+                        sendMessageToNative({
+                                            type: 'RECORD_DAMAGE',
+                                            decalDetails: {
+                                            x: INTERSECTED.point.x,
+                                            y: INTERSECTED.point.y,
+                                            z: INTERSECTED.point.z,
+                                            uniqueId: uniqueId,
+                                            axis: axis,
+                                            radians: radians,
+                                            controlsObjectPosition: controls.object.position,
+                                            isWeb: 0,
+                                            modelType,
+                                            }
+                                            })
+
+                    }
+                }
+            }
+            mouse.isMoving = false;
+        }
+
+        function render() {
+            stats.update();
+            renderer.render(scene, camera);
+        }
+
+        function removeDecalsForce(){
+            for (let i = scene.children && scene.children.length - 1; i >= 0 ; i--) {
+                    let child = scene.children[ i ];
+                    if ( child !== camera ) { //camera is stored earlier
+                        scene.remove(child);
+                    }
+                }
+        }
+
+            </script>
+
+    </body>
+
+</html>
